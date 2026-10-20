@@ -1,1 +1,9 @@
+/build/
+/dist/
+/lib/*.jar
 /nbproject/private/
+/database.properties
+*.class
+*.log
+.DS_Store
+Thumbs.db

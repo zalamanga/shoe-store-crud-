@@ -1,0 +1,5 @@
+# Salin ke database.properties dan isi kredensial SQL Server milik Anda.
+# trustServerCertificate=true hanya untuk SQL Server lokal dengan sertifikat mandiri.
+db.url=jdbc:sqlserver://localhost:1433;databaseName=SHOEStoremanaj;encrypt=true;trustServerCertificate=true;loginTimeout=5;socketTimeout=10000
+db.user=
+db.password=

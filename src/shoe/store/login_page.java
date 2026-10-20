@@ -1,33 +1,24 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/GUIForms/JFrame.java to edit this template
- */
 package shoe.store;
 
-
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
+import java.util.Arrays;
+import java.util.concurrent.ExecutionException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import javax.swing.JOptionPane;
-
+import javax.swing.SwingWorker;
 
 public class login_page extends javax.swing.JFrame {
 
-    
+
+    private static final Logger LOGGER = Logger.getLogger(login_page.class.getName());
+
     public login_page() {
         initComponents();
+        setTitle("Shoe Store - Login");
+        getRootPane().setDefaultButton(login);
     }
 
-    String driver = "com.microsoft.sqlserver.jdbc.SQLServerDriver";
-    String url = "jdbc:sqlserver://localhost\\LAPTOP-EADDRC3D:1433;databaseName=SHOEStoremanaj";
-    String user = "sa";
-    String password = "1234"; 
-    Statement st=null;
-    ResultSet rs=null;
-    
     @SuppressWarnings("unchecked")
     // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
     private void initComponents() {
@@ -62,11 +53,6 @@ public class login_page extends javax.swing.JFrame {
         login.setFont(new java.awt.Font("Arial", 0, 12)); // NOI18N
         login.setForeground(java.awt.Color.white);
         login.setText("Login");
-        login.addMouseListener(new java.awt.event.MouseAdapter() {
-            public void mouseClicked(java.awt.event.MouseEvent evt) {
-                loginMouseClicked(evt);
-            }
-        });
         login.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
                 loginActionPerformed(evt);
@@ -129,74 +115,81 @@ public class login_page extends javax.swing.JFrame {
     }// </editor-fold>//GEN-END:initComponents
 
     private void loginActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_loginActionPerformed
-        // TODO add your handling code here:
-        
+        attemptLogin();
     }//GEN-LAST:event_loginActionPerformed
 
     private void usernameActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_usernameActionPerformed
-        // TODO add your handling code here:
-        
-        
+        pass.requestFocusInWindow();
     }//GEN-LAST:event_usernameActionPerformed
 
-    private void loginMouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_loginMouseClicked
- 
-     try 
-    {
-    Connection conn = DriverManager.getConnection(url, user, password);
-    String sql = "SELECT * FROM login WHERE username=? AND password=?";
-    PreparedStatement pst = conn.prepareStatement(sql);
-    pst.setString(1, username.getText());
-    pst.setString(2, new String(pass.getPassword()));
-    ResultSet rs = pst.executeQuery();
-    if (rs.next()) {
-        JOptionPane.showMessageDialog(null, "Login berhasil");
-                    MenuUtama menu = new MenuUtama();
-                    menu.setVisible(true);
-                    dispose();
-    } else {
-        JOptionPane.showMessageDialog(null, "Login gagal");
-                   username.setText("");
-                   pass.setText("");
-    }
-} catch (SQLException e) {
-    JOptionPane.showMessageDialog(null, e);
-}
-    }//GEN-LAST:event_loginMouseClicked
 
-    /**
-     * @param args the command line arguments
-     */
-    public static void main(String args[]) {
-        /* Set the Nimbus look and feel */
-        //<editor-fold defaultstate="collapsed" desc=" Look and feel setting code (optional) ">
-        /* If Nimbus (introduced in Java SE 6) is not available, stay with the default look and feel.
-         * For details see http://download.oracle.com/javase/tutorial/uiswing/lookandfeel/plaf.html 
-         */
-        try {
-            for (javax.swing.UIManager.LookAndFeelInfo info : javax.swing.UIManager.getInstalledLookAndFeels()) {
-                if ("Nimbus".equals(info.getName())) {
-                    javax.swing.UIManager.setLookAndFeel(info.getClassName());
-                    break;
+    private void attemptLogin() {
+        if (!login.isEnabled()) {
+            return;
+        }
+        String enteredUsername = username.getText().trim();
+        char[] enteredPassword = pass.getPassword();
+        if (enteredUsername.isEmpty() || enteredPassword.length == 0) {
+            Arrays.fill(enteredPassword, '\0');
+            JOptionPane.showMessageDialog(this, "Username dan password wajib diisi.",
+                    "Login", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        setLoginEnabled(false);
+        new SwingWorker<Boolean, Void>() {
+            @Override
+            protected Boolean doInBackground() throws SQLException {
+                try {
+                    return LoginService.authenticate(enteredUsername, enteredPassword);
+                } finally {
+                    Arrays.fill(enteredPassword, '\0');
                 }
             }
-        } catch (ClassNotFoundException ex) {
-            java.util.logging.Logger.getLogger(login_page.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
-        } catch (InstantiationException ex) {
-            java.util.logging.Logger.getLogger(login_page.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
-        } catch (IllegalAccessException ex) {
-            java.util.logging.Logger.getLogger(login_page.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
-        } catch (javax.swing.UnsupportedLookAndFeelException ex) {
-            java.util.logging.Logger.getLogger(login_page.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
-        }
-        //</editor-fold>
 
-        /* Create and display the form */
-        java.awt.EventQueue.invokeLater(new Runnable() {
-            public void run() {
-                new login_page().setVisible(true);
+            @Override
+            protected void done() {
+                if (!isDisplayable()) {
+                    return;
+                }
+                try {
+                    if (get()) {
+                        AppUi.open(login_page.this, new MenuUtama());
+                    } else {
+                        JOptionPane.showMessageDialog(login_page.this,
+                                "Username atau password tidak sesuai.", "Login gagal",
+                                JOptionPane.WARNING_MESSAGE);
+                    }
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                } catch (ExecutionException ex) {
+                    Throwable cause = ex.getCause();
+                    if (cause instanceof SQLException) {
+                        SQLException sql = (SQLException) cause;
+                        LOGGER.log(Level.WARNING, "Login gagal: SQLState={0}, kode={1}",
+                                new Object[] {sql.getSQLState(), sql.getErrorCode()});
+                    } else {
+                        LOGGER.log(Level.SEVERE, "Login gagal.", cause);
+                    }
+                    JOptionPane.showMessageDialog(login_page.this,
+                            "Login belum dapat diproses. Periksa database.properties dan koneksi SQL Server.",
+                            "Koneksi database", JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    pass.setText("");
+                    setLoginEnabled(true);
+                    pass.requestFocusInWindow();
+                }
             }
-        });
+        }.execute();
+    }
+
+    private void setLoginEnabled(boolean enabled) {
+        login.setEnabled(enabled);
+        username.setEnabled(enabled);
+        pass.setEnabled(enabled);
+    }
+
+    public static void main(String[] args) {
+        AppUi.launch(login_page::new);
     }
 
     // Variables declaration - do not modify//GEN-BEGIN:variables

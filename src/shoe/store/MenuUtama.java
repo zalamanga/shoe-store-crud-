@@ -1,22 +1,10 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/GUIForms/JFrame.java to edit this template
- */
 package shoe.store;
 
-
-
-/**
- *
- * @author USER
- */
 public class MenuUtama extends javax.swing.JFrame {
 
-    /**
-     * Creates new form MenuUtama
-     */
     public MenuUtama() {
         initComponents();
+        setTitle("Shoe Store - Menu Utama");
     }
 
     /**
@@ -106,73 +94,23 @@ public class MenuUtama extends javax.swing.JFrame {
     }// </editor-fold>//GEN-END:initComponents
 
     private void productActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_productActionPerformed
-        // TODO add your handling code here:
-        Product page = new Product(); // buat objek Customer
-        MenuUtama menu = new MenuUtama();
-        page.setVisible(true); // tampilkan frame Customer
-        menu.setVisible(false);
-        dispose();
+        AppUi.open(this, new Product());
     }//GEN-LAST:event_productActionPerformed
 
     private void supplierActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_supplierActionPerformed
-        // TODO add your handling code here:
-        Supplier page = new Supplier(); // buat objek Customer
-         MenuUtama menu = new MenuUtama();
-        page.setVisible(true); // tampilkan frame Customer
-         menu.setVisible(false);
-        dispose();
+        AppUi.open(this, new Supplier());
     }//GEN-LAST:event_supplierActionPerformed
 
     private void customerActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_customerActionPerformed
-                    Customer page = new Customer();
-                    MenuUtama menu = new MenuUtama();
-                    page.setVisible(true);
-                    menu.setVisible(false);
-                    dispose();
+        AppUi.open(this, new Customer());
     }//GEN-LAST:event_customerActionPerformed
 
     private void employeeActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_employeeActionPerformed
-        // TODO add your handling code here:
-        Employee page = new Employee(); // buat objek Customer
-        MenuUtama menu = new MenuUtama();
-        page.setVisible(true); // tampilkan frame Customer
-        menu.setVisible(false);
-        dispose();
+        AppUi.open(this, new Employee());
     }//GEN-LAST:event_employeeActionPerformed
 
-    /**
-     * @param args the command line arguments
-     */
-    public static void main(String args[]) {
-        /* Set the Nimbus look and feel */
-        //<editor-fold defaultstate="collapsed" desc=" Look and feel setting code (optional) ">
-        /* If Nimbus (introduced in Java SE 6) is not available, stay with the default look and feel.
-         * For details see http://download.oracle.com/javase/tutorial/uiswing/lookandfeel/plaf.html 
-         */
-        try {
-            for (javax.swing.UIManager.LookAndFeelInfo info : javax.swing.UIManager.getInstalledLookAndFeels()) {
-                if ("Nimbus".equals(info.getName())) {
-                    javax.swing.UIManager.setLookAndFeel(info.getClassName());
-                    break;
-                }
-            }
-        } catch (ClassNotFoundException ex) {
-            java.util.logging.Logger.getLogger(MenuUtama.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
-        } catch (InstantiationException ex) {
-            java.util.logging.Logger.getLogger(MenuUtama.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
-        } catch (IllegalAccessException ex) {
-            java.util.logging.Logger.getLogger(MenuUtama.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
-        } catch (javax.swing.UnsupportedLookAndFeelException ex) {
-            java.util.logging.Logger.getLogger(MenuUtama.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
-        }
-        //</editor-fold>
-
-        /* Create and display the form */
-        java.awt.EventQueue.invokeLater(new Runnable() {
-            public void run() {
-                new MenuUtama().setVisible(true);
-            }
-        });
+    public static void main(String[] args) {
+        AppUi.launch(MenuUtama::new);
     }
 
     // Variables declaration - do not modify//GEN-BEGIN:variables
