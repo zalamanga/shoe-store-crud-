@@ -16,6 +16,9 @@ public class login_page extends javax.swing.JFrame {
     public login_page() {
         initComponents();
         setTitle("Shoe Store - Login");
+        login.setForeground(java.awt.Color.BLACK);
+        jLabel2.setLabelFor(username);
+        jLabel3.setLabelFor(pass);
         getRootPane().setDefaultButton(login);
     }
 
@@ -136,11 +139,12 @@ public class login_page extends javax.swing.JFrame {
             return;
         }
         setLoginEnabled(false);
-        new SwingWorker<Boolean, Void>() {
+        new SwingWorker<LoginService.Result, Void>() {
             @Override
-            protected Boolean doInBackground() throws SQLException {
+            protected LoginService.Result doInBackground() throws SQLException {
                 try {
-                    return LoginService.authenticate(enteredUsername, enteredPassword);
+                    return LoginService.check(Database::getConnection, enteredUsername,
+                            enteredPassword, Database.allowLegacyPasswords());
                 } finally {
                     Arrays.fill(enteredPassword, '\0');
                 }
@@ -152,8 +156,20 @@ public class login_page extends javax.swing.JFrame {
                     return;
                 }
                 try {
-                    if (get()) {
+                    LoginService.Result result = get();
+                    if (result == LoginService.Result.SUCCESS || result == LoginService.Result.LEGACY_SUCCESS) {
+                        if (result == LoginService.Result.LEGACY_SUCCESS) {
+                            JOptionPane.showMessageDialog(login_page.this,
+                                    "Akun ini masih memakai password lama. Jalankan AccountTool migrate "
+                                    + "untuk akun ini, lalu nonaktifkan SHOE_ALLOW_LEGACY_PASSWORDS.",
+                                    "Migrasi password diperlukan", JOptionPane.WARNING_MESSAGE);
+                        }
                         AppUi.open(login_page.this, new MenuUtama());
+                    } else if (result == LoginService.Result.LEGACY_DISABLED) {
+                        JOptionPane.showMessageDialog(login_page.this,
+                                "Akun lama belum dimigrasikan. Jalankan AccountTool migrate USERNAME "
+                                + "dari terminal. Lihat bagian migrasi akun pada README.",
+                                "Migrasi password diperlukan", JOptionPane.WARNING_MESSAGE);
                     } else {
                         JOptionPane.showMessageDialog(login_page.this,
                                 "Username atau password tidak sesuai.", "Login gagal",

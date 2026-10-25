@@ -5,9 +5,11 @@ public class Customer extends javax.swing.JFrame {
 
     public Customer() {
         initComponents();
+        setTitle("Shoe Store - Customer");
         crud = new CrudTableController(this, jTable2, search, "customer",
                 new String[]{"customer_id", "customer_name", "customer_address", "phone_number"},
                 custid, custname, custadr, custnum);
+        crud.bindActions(btninsert, btnupdate, btndelete, btnread);
     }
 
     @SuppressWarnings("unchecked")
@@ -250,8 +252,9 @@ public class Customer extends javax.swing.JFrame {
     }//GEN-LAST:event_btnreadActionPerformed
 
     private void btnbackActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnbackActionPerformed
-        crud.stopSearch();
-        AppUi.open(this, new MenuUtama());
+        if (crud.requestClose()) {
+            AppUi.open(this, new MenuUtama());
+        }
     }//GEN-LAST:event_btnbackActionPerformed
 
     private void btninsertMouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_btninsertMouseClicked

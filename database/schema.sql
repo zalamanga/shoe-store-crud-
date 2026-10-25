@@ -53,7 +53,8 @@ BEGIN
 END;
 GO
 
--- Kompatibel dengan login lama. Akun dibuat sendiri, tanpa kredensial bawaan.
+-- Akun dibuat melalui AccountTool agar kolom password berisi hash PBKDF2.
+-- Tabel lama tidak diubah otomatis; AccountTool migrate bekerja pada satu akun.
 IF OBJECT_ID(N'dbo.login', N'U') IS NULL
 BEGIN
     CREATE TABLE dbo.login (

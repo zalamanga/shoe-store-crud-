@@ -5,9 +5,11 @@ public class Employee extends javax.swing.JFrame {
 
     public Employee() {
         initComponents();
+        setTitle("Shoe Store - Employee");
         crud = new CrudTableController(this, jTable2, search, "employee",
                 new String[]{"employee_id", "employee_name", "employee_address", "phone_number"},
                 empid, empname, empadr, empnum);
+        crud.bindActions(btninsert, btnupdate, btndelete, btnread);
     }
 
     @SuppressWarnings("unchecked")
@@ -248,8 +250,9 @@ public class Employee extends javax.swing.JFrame {
     }//GEN-LAST:event_btnreadActionPerformed
 
     private void btnbackActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnbackActionPerformed
-        crud.stopSearch();
-        AppUi.open(this, new MenuUtama());
+        if (crud.requestClose()) {
+            AppUi.open(this, new MenuUtama());
+        }
     }//GEN-LAST:event_btnbackActionPerformed
 
     private void btninsertMouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_btninsertMouseClicked

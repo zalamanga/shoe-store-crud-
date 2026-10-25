@@ -16,7 +16,11 @@ public final class LoginServiceTest {
         closesResourcesAfterQueryFailure();
         closesConnectionAfterPrepareFailure();
         propagatesConnectionFailure();
-        System.out.println("LoginServiceTest: 6 checks passed");
+        rejectsLegacyByDefault();
+        permitsExplicitLegacyTransition();
+        malformedHashNeverFallsBack();
+        rejectsDuplicateUsernames();
+        System.out.println("LoginServiceTest: 10 checks passed");
     }
 
     private static void rejectsEmptyInputWithoutOpeningDatabase() throws SQLException {
@@ -32,13 +36,15 @@ public final class LoginServiceTest {
     private static void authenticatesWithBoundParameters() throws SQLException {
         JdbcStub jdbc = new JdbcStub(true);
         String user = "name' OR 1=1 --";
-        String password = " pass'word ";
+        String password = " pass'word-long ";
+        jdbc.stored = Passwords.hash(password.toCharArray());
         check(LoginService.authenticate(jdbc::connection, "  " + user + "  ", password.toCharArray()),
                 "Matching credentials");
         check(!jdbc.sql.contains(user), "Username must be a parameter");
         check(!jdbc.sql.contains(password), "Password must be a parameter");
         check(user.equals(jdbc.parameters.get(1)), "Username is trimmed before lookup");
-        check(password.equals(jdbc.parameters.get(2)), "Password whitespace is preserved");
+        check(jdbc.parameters.size() == 1, "Password never becomes a SQL parameter");
+        check(jdbc.sql.equals("SELECT password FROM dbo.login WHERE username = ?"), "Fetch by username only");
         check(jdbc.timeout > 0, "Query has a timeout");
         jdbc.assertClosed(true);
     }
@@ -68,6 +74,39 @@ public final class LoginServiceTest {
         expectSqlException(() -> LoginService.authenticate(() -> {
             throw new SQLException("Test connection failure");
         }, "admin", "pw".toCharArray()));
+    }
+
+    private static void rejectsLegacyByDefault() throws SQLException {
+        JdbcStub jdbc = new JdbcStub(true);
+        jdbc.stored = "old-secret";
+        check(LoginService.check(jdbc::connection, "legacy", "old-secret".toCharArray(), false)
+                == LoginService.Result.LEGACY_DISABLED, "Default requires explicit migration");
+        jdbc.assertClosed(true);
+    }
+
+    private static void permitsExplicitLegacyTransition() throws SQLException {
+        JdbcStub jdbc = new JdbcStub(true);
+        jdbc.stored = " old'secret ";
+        check(LoginService.check(jdbc::connection, "legacy", " old'secret ".toCharArray(), true)
+                == LoginService.Result.LEGACY_SUCCESS, "Explicit transition preserves password whitespace");
+        JdbcStub wrong = new JdbcStub(true);
+        wrong.stored = jdbc.stored;
+        check(LoginService.check(wrong::connection, "legacy", "wrong".toCharArray(), true)
+                == LoginService.Result.INVALID, "Legacy wrong password rejected");
+    }
+
+    private static void malformedHashNeverFallsBack() throws SQLException {
+        JdbcStub jdbc = new JdbcStub(true);
+        jdbc.stored = "pbkdf2-sha256$broken";
+        check(LoginService.check(jdbc::connection, "admin", jdbc.stored.toCharArray(), true)
+                == LoginService.Result.INVALID, "Malformed hash cannot authenticate as literal plaintext");
+    }
+
+    private static void rejectsDuplicateUsernames() {
+        JdbcStub jdbc = new JdbcStub(true);
+        jdbc.duplicate = true;
+        expectSqlException(() -> LoginService.authenticate(jdbc::connection, "duplicate", "secret".toCharArray()));
+        jdbc.assertClosed(true);
     }
 
     private static void expectSqlException(SqlAction action) {
@@ -100,6 +139,8 @@ public final class LoginServiceTest {
         boolean resultClosed;
         boolean queryFailure;
         boolean prepareFailure;
+        boolean duplicate;
+        String stored;
 
         JdbcStub(boolean match) {
             this.match = match;
@@ -147,10 +188,13 @@ public final class LoginServiceTest {
         }
 
         ResultSet rows() {
+            int[] cursor = {0};
             return proxy(ResultSet.class, (object, method, args) -> {
                 switch (method.getName()) {
                     case "next":
-                        return match;
+                        return match && ++cursor[0] <= (duplicate ? 2 : 1);
+                    case "getString":
+                        return stored;
                     case "close":
                         resultClosed = true;
                         return null;

@@ -1,6 +1,8 @@
 package shoe.store;
 
 import java.lang.reflect.Proxy;
+import java.awt.SecondaryLoop;
+import java.awt.Toolkit;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -18,6 +20,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 
@@ -41,6 +44,8 @@ public final class CrudTableControllerTest {
             verifyFailures();
         });
         verifyPastedSearch();
+        verifyNonblockingAndLatestSearch();
+        verifyPendingWriteAndClosingRead();
         System.out.println("CrudTableControllerTest: " + checks + " checks passed.");
     }
 
@@ -49,6 +54,7 @@ public final class CrudTableControllerTest {
         fixture.database.rows.add(row(columns, "B02"));
         fixture.database.rows.add(row(columns, "A01"));
         fixture.crud.loadAll();
+        await(fixture);
         check(fixture.table.getRowCount() == 2, tableName + " initial load");
         check(!fixture.table.isCellEditable(0, 0), tableName + " read-only cells");
         check(fixture.database.calls.get(0).sql.contains("FROM [dbo].[" + tableName + "]"),
@@ -65,6 +71,7 @@ public final class CrudTableControllerTest {
             fixture.fields[i].setText(i == 0 ? "renamed'id" : "new-" + i);
         }
         fixture.crud.update();
+        await(fixture);
         Call update = fixture.database.mutations().get(0);
         check(update.sql.endsWith("WHERE [" + columns[0] + "] = ?"), tableName + " update key is ID");
         check(update.parameters.size() == columns.length + 1, tableName + " binds every updated column");
@@ -82,6 +89,7 @@ public final class CrudTableControllerTest {
         String originalId = fixture.fields[0].getText();
         fixture.fields[0].setText("different typed ID");
         fixture.crud.delete();
+        await(fixture);
         Call delete = fixture.database.mutations().get(1);
         check(delete.sql.equals("DELETE FROM [dbo].[" + tableName + "] WHERE [" + columns[0] + "] = ?"),
                 tableName + " delete uses primary ID");
@@ -91,6 +99,7 @@ public final class CrudTableControllerTest {
 
         fixture.fill("  O'Neil%_  ");
         fixture.crud.insert();
+        await(fixture);
         Call insert = fixture.database.mutations().get(2);
         check(insert.sql.startsWith("INSERT INTO [dbo].[" + tableName + "] ("), tableName + " explicit insert columns");
         check(insert.parameters.size() == columns.length, tableName + " binds all insert values");
@@ -104,6 +113,7 @@ public final class CrudTableControllerTest {
         Fixture fixture = new Fixture("customer", COLUMNS[0]);
         fixture.search.setText("%_~[' OR 1=1--");
         fixture.crud.loadFiltered();
+        await(fixture);
         Call select = fixture.database.calls.get(0);
         check(select.sql.contains("LIKE ? ESCAPE '~'"), "search uses bound LIKE pattern");
         check(!select.sql.contains("OR 1=1--"), "search input never becomes SQL");
@@ -113,6 +123,7 @@ public final class CrudTableControllerTest {
         }
         assertClosed(select, fixture.database);
         fixture.crud.loadAll();
+        await(fixture);
         Call all = fixture.database.calls.get(1);
         check(fixture.search.getText().isEmpty(), "Read clears search");
         check(!all.sql.contains(" WHERE ") && all.parameters.isEmpty(), "Read reloads unfiltered records");
@@ -161,18 +172,19 @@ public final class CrudTableControllerTest {
 
         fixture.database.rows.add(row(COLUMNS[0], "A01"));
         fixture.crud.loadAll();
+        await(fixture);
         fixture.table.setRowSelectionInterval(0, 0);
         fixture.dialogs.confirmDelete = false;
         fixture.crud.delete();
         check(fixture.database.mutations().isEmpty(), "cancelled delete does not execute SQL");
         fixture.dialogs.confirmDelete = true;
         fixture.dialogs.onConfirm = () -> {
-            fixture.crud.loadAll();
             fixture.table.clearSelection();
         };
         fixture.crud.delete();
+        await(fixture);
         check(fixture.database.mutations().get(0).parameters.get(1).equals("A01"),
-                "delete targets confirmed ID even when modal callback refreshes selection");
+                "delete targets confirmed ID even when modal callback clears selection");
         fixture.crud.stopSearch();
         product.crud.stopSearch();
     }
@@ -182,16 +194,19 @@ public final class CrudTableControllerTest {
         fixture.fill("value");
         fixture.database.affected = 0;
         fixture.crud.insert();
+        await(fixture);
         check(!fixture.dialogs.hasInformation(), "zero affected rows cannot report success");
         check(fixture.fields[0].getText().isEmpty(), "zero affected rows clears stale input/selection");
         fixture.database.affected = -1;
         fixture.fill("value");
         fixture.crud.insert();
+        await(fixture);
         check(!fixture.dialogs.hasInformation(), "unknown affected count cannot report success");
 
         fixture.database.failMutation = true;
         fixture.fill("value");
         fixture.crud.insert();
+        await(fixture);
         check(!fixture.dialogs.hasInformation(), "SQL failure cannot report success");
         check(fixture.fields[0].getText().equals("value"), "failed save preserves input");
         assertClosed(fixture.database.calls.get(2), fixture.database);
@@ -201,6 +216,7 @@ public final class CrudTableControllerTest {
         fixture.table.setRowSelectionInterval(0, 0);
         fixture.fields[1].setText("unsaved change");
         fixture.crud.loadAll();
+        await(fixture);
         assertClosed(fixture.database.calls.get(3), fixture.database);
         check(fixture.table.getRowCount() == 1 && fixture.fields[1].getText().equals("unsaved change"),
                 "failed Read preserves previous table and unsaved input");
@@ -210,12 +226,14 @@ public final class CrudTableControllerTest {
         reading.database.rows.add(row(COLUMNS[0], "A01"));
         reading.database.failRead = true;
         reading.crud.loadAll();
+        await(reading);
         assertClosed(reading.database.calls.get(0), reading.database);
 
         Fixture saved = new Fixture("customer", COLUMNS[0]);
         saved.database.failQuery = true;
         saved.fill("value");
         saved.crud.insert();
+        await(saved);
         check(saved.database.mutations().size() == 1, "refresh failure does not repeat mutation");
         check(saved.dialogs.messages.stream().anyMatch(message -> message.startsWith("The change was saved, but")),
                 "refresh failure distinguishes saved change from failed refresh");
@@ -236,10 +254,108 @@ public final class CrudTableControllerTest {
         });
         check(queried.await(3, TimeUnit.SECONDS), "document listener searches pasted text without key event");
         SwingUtilities.invokeAndWait(() -> {
+            await(holder[0]);
             check(holder[0].database.calls.get(0).parameters.get(1).equals("%pasted text%"),
                     "debounced search reads current document contents");
             holder[0].crud.stopSearch();
         });
+    }
+
+    private static void verifyNonblockingAndLatestSearch() throws Exception {
+        Fixture[] holder = new Fixture[1];
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch heartbeat = new CountDownLatch(1);
+        SwingUtilities.invokeAndWait(() -> {
+            Fixture fixture = new Fixture("customer", COLUMNS[0]);
+            holder[0] = fixture;
+            fixture.database.rows.add(row(COLUMNS[0], "OLD"));
+            fixture.database.entered = entered;
+            fixture.database.release = release;
+            fixture.crud.loadAll();
+            fixture.fill("duplicate action");
+            fixture.crud.insert();
+            SwingUtilities.invokeLater(heartbeat::countDown);
+        });
+        check(entered.await(2, TimeUnit.SECONDS), "JDBC read starts on worker");
+        check(heartbeat.await(1, TimeUnit.SECONDS), "EDT remains responsive while JDBC is blocked");
+        SwingUtilities.invokeAndWait(() -> {
+            Fixture fixture = holder[0];
+            fixture.database.rows.clear();
+            fixture.database.rows.add(row(COLUMNS[0], "NEW"));
+            fixture.search.setText("new");
+            fixture.crud.loadFiltered();
+            release.countDown();
+            await(fixture);
+            check(fixture.database.mutations().isEmpty(), "Action during pending read cannot create a write");
+            check(fixture.database.calls.size() == 2, "Latest search runs once after current read");
+            check("%new%".equals(fixture.database.calls.get(1).parameters.get(1)), "Queued search captures latest filter");
+            check("NEW".equals(fixture.table.getValueAt(0, 0)), "Stale read cannot replace latest results");
+            fixture.crud.requestClose();
+        });
+    }
+
+    private static void verifyPendingWriteAndClosingRead() throws Exception {
+        Fixture[] holder = new Fixture[1];
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        SwingUtilities.invokeAndWait(() -> {
+            Fixture fixture = new Fixture("customer", COLUMNS[0]);
+            holder[0] = fixture;
+            fixture.database.entered = entered;
+            fixture.database.release = release;
+            fixture.database.blockWrite = true;
+            fixture.fill("saved once");
+            fixture.crud.insert();
+            fixture.crud.insert();
+            check(!fixture.crud.requestClose(), "Close and Back are blocked while a write is pending");
+            check(fixture.dialogs.messages.stream().anyMatch(message -> message.contains("being saved")),
+                    "Pending write explains why leaving must wait");
+        });
+        check(entered.await(2, TimeUnit.SECONDS), "Pending write reaches JDBC worker");
+        release.countDown();
+        SwingUtilities.invokeAndWait(() -> {
+            await(holder[0]);
+            check(holder[0].database.mutations().size() == 1, "Repeated save cannot replay a pending mutation");
+            check(holder[0].crud.requestClose(), "Leaving is allowed after write and refresh complete");
+        });
+
+        CountDownLatch reading = new CountDownLatch(1);
+        CountDownLatch finish = new CountDownLatch(1);
+        SwingUtilities.invokeAndWait(() -> {
+            Fixture fixture = new Fixture("customer", COLUMNS[0]);
+            holder[0] = fixture;
+            fixture.database.rows.add(row(COLUMNS[0], "LATE"));
+            fixture.database.entered = reading;
+            fixture.database.release = finish;
+            fixture.crud.loadAll();
+        });
+        check(reading.await(2, TimeUnit.SECONDS), "Closing-read scenario starts query");
+        SwingUtilities.invokeAndWait(() -> {
+            check(holder[0].crud.requestClose(), "A pending read can be closed");
+            finish.countDown();
+            await(holder[0]);
+            check(holder[0].table.getRowCount() == 0, "Late read does not update a closed form");
+            check(holder[0].dialogs.messages.isEmpty(), "Closed read cannot display an error dialog");
+        });
+    }
+
+    private static void await(Fixture fixture) {
+        if (!fixture.crud.isWorking()) {
+            return;
+        }
+        SecondaryLoop loop = Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        Timer timer = new Timer(5, event -> {
+            if (!fixture.crud.isWorking() || System.nanoTime() >= deadline) {
+                ((Timer) event.getSource()).stop();
+                loop.exit();
+            }
+        });
+        timer.start();
+        loop.enter();
+        timer.stop();
+        check(!fixture.crud.isWorking(), "Worker completes within deadline");
     }
 
     private static Map<String, String> row(String[] columns, String id) {
@@ -295,6 +411,7 @@ public final class CrudTableControllerTest {
 
         @Override
         public void message(String message, String title, int type) {
+            check(SwingUtilities.isEventDispatchThread(), "Dialogs only run on EDT");
             messages.add(message);
             types.add(type);
         }
@@ -336,6 +453,9 @@ public final class CrudTableControllerTest {
         private boolean failQuery;
         private boolean failRead;
         private CountDownLatch queried;
+        private CountDownLatch entered;
+        private CountDownLatch release;
+        private boolean blockWrite;
 
         @Override
         public Connection getConnection() {
@@ -367,6 +487,10 @@ public final class CrudTableControllerTest {
                                 call.timeout = (Integer) arguments[0];
                                 return null;
                             case "executeQuery":
+                                List<Map<String, String>> snapshot = new ArrayList<>(rows);
+                                if (!blockWrite) {
+                                    blockOnce();
+                                }
                                 if (queried != null) {
                                     queried.countDown();
                                 }
@@ -374,8 +498,11 @@ public final class CrudTableControllerTest {
                                     throw new SQLException("Simulated read failure");
                                 }
                                 call.resultCreated = true;
-                                return results(call);
+                                return results(call, snapshot);
                             case "executeUpdate":
+                                if (blockWrite) {
+                                    blockOnce();
+                                }
                                 if (failMutation) {
                                     throw new SQLException("Simulated write failure");
                                 }
@@ -389,18 +516,34 @@ public final class CrudTableControllerTest {
                     });
         }
 
-        private ResultSet results(Call call) {
+        private void blockOnce() throws SQLException {
+            if (entered != null) {
+                CountDownLatch pending = release;
+                entered.countDown();
+                entered = null;
+                try {
+                    if (!pending.await(3, TimeUnit.SECONDS)) {
+                        throw new SQLException("Synthetic blocking query timed out");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new SQLException("Synthetic query interrupted", exception);
+                }
+            }
+        }
+
+        private ResultSet results(Call call, List<Map<String, String>> snapshot) {
             int[] cursor = {-1};
             return (ResultSet) Proxy.newProxyInstance(getClass().getClassLoader(),
                     new Class<?>[]{ResultSet.class}, (proxy, method, arguments) -> {
                         switch (method.getName()) {
                             case "next":
-                                return ++cursor[0] < rows.size();
+                                return ++cursor[0] < snapshot.size();
                             case "getString":
                                 if (failRead) {
                                     throw new SQLException("Simulated result read failure");
                                 }
-                                return rows.get(cursor[0]).get((String) arguments[0]);
+                                return snapshot.get(cursor[0]).get((String) arguments[0]);
                             case "close":
                                 call.resultClosed = true;
                                 return null;

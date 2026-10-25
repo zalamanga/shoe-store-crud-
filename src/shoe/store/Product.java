@@ -7,10 +7,12 @@ public class Product extends javax.swing.JFrame {
 
     public Product() {
         initComponents();
+        setTitle("Shoe Store - Product");
         crud = new CrudTableController(this, jTable2, search, "product",
                 new String[]{"shoe_id", "shoe_brand", "shoe_name", "color", "size", "price", "stock"},
                 shoeid, shoebrand, shoename, shoecolor, shoesize, shoeprice, shoestock);
         crud.setValidator(Product::validateProduct);
+        crud.bindActions(btninsert, btnupdate, btndelete, btnread);
     }
 
     @SuppressWarnings("unchecked")
@@ -283,8 +285,9 @@ public class Product extends javax.swing.JFrame {
     }//GEN-LAST:event_btnreadActionPerformed
 
     private void btnbackActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnbackActionPerformed
-        crud.stopSearch();
-        AppUi.open(this, new MenuUtama());
+        if (crud.requestClose()) {
+            AppUi.open(this, new MenuUtama());
+        }
     }//GEN-LAST:event_btnbackActionPerformed
 
     private void btninsertMouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_btninsertMouseClicked

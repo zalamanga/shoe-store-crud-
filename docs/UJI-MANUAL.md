@@ -2,6 +2,8 @@
 
 Gunakan database pengembangan yang sudah disiapkan melalui [README](../README.md). Checklist ini adalah langkah pemeriksaan, bukan pernyataan bahwa semua fitur sudah lulus uji.
 
+Pada 26 Oktober 2026, harness terpisah menjalankan 113 pemeriksaan integrasi dan mengamati 38 dialog pada JDK 17.0.12, JDBC Driver 13.6.0.jre11, dan SQL Server 2022 Developer `16.0.4305.5`. Hasil ringkas dan ekspor komponen UI berada pada [README](../README.md#pengujian). Kotak di bawah tetap kosong untuk pencatatan uji ulang pada lingkungan Anda.
+
 Catat hasil setelah menjalankan aplikasi:
 
 | Informasi | Hasil |
@@ -20,6 +22,10 @@ Catat hasil setelah menjalankan aplikasi:
 - [ ] Menu utama dapat membuka Product, Customer, Employee, dan Supplier.
 - [ ] Tombol Back kembali ke menu tanpa menumpuk jendela lama.
 - [ ] Ketika koneksi database gagal, aplikasi menampilkan pesan dan dapat dicoba lagi.
+- [ ] Akun baru yang dibuat melalui AccountTool tersimpan sebagai hash dan dapat login.
+- [ ] Akun plaintext ditolak dengan petunjuk migrasi pada konfigurasi default.
+- [ ] Opt-in transisi menampilkan peringatan; migrate satu akun tidak mengubah akun lain.
+- [ ] Password lama salah, hash rusak, kolom terlalu pendek, atau username tidak unik menolak migrasi.
 
 ## Data percobaan
 
@@ -66,6 +72,11 @@ Ulangi urutan ini untuk keempat modul. Catat hasil tiap modul secara terpisah.
 - [ ] Tombol Insert melalui klik mouse atau keyboard tidak menyimpan data dua kali.
 - [ ] Aplikasi menangani tabel kosong dan pencarian tanpa hasil.
 - [ ] Insert atau Update yang gagal karena koneksi tidak menampilkan pesan sukses dan mempertahankan input pada form.
+- [ ] Saat koneksi lambat, jendela tetap merespons dan menampilkan status loading atau saving.
+- [ ] Back dan tutup jendela memberi pesan tunggu selama penyimpanan, lalu berfungsi setelah selesai.
+- [ ] Klik simpan berulang saat worker aktif tidak mengirim perintah tulis kedua.
+- [ ] Pencarian terbaru menang ketika hasil query lama selesai terlambat.
+- [ ] Gagal refresh setelah simpan menjelaskan bahwa perubahan sudah tersimpan; jangan mengulang Insert.
 
 ## Catatan hasil
 

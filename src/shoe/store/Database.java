@@ -23,6 +23,10 @@ public final class Database {
                 config.getProperty("user"), config.getProperty("password"));
     }
 
+    static boolean allowLegacyPasswords() {
+        return "true".equalsIgnoreCase(System.getenv("SHOE_ALLOW_LEGACY_PASSWORDS"));
+    }
+
     static Properties loadConfiguration(Path configPath, Map<String, String> environment)
             throws SQLException {
         Properties file = new Properties();

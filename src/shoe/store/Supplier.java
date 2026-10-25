@@ -5,9 +5,11 @@ public class Supplier extends javax.swing.JFrame {
 
     public Supplier() {
         initComponents();
+        setTitle("Shoe Store - Supplier");
         crud = new CrudTableController(this, jTable2, search, "supplier",
                 new String[]{"supplier_id", "supplier_name", "supplier_address", "supplier_brand", "phone_number"},
                 supid, supname, supadr, supbrand, supnum);
+        crud.bindActions(btninsert, btnupdate, btndelete, btnread);
     }
 
     @SuppressWarnings("unchecked")
@@ -261,8 +263,9 @@ public class Supplier extends javax.swing.JFrame {
     }//GEN-LAST:event_btnreadActionPerformed
 
     private void jButton1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
-        crud.stopSearch();
-        AppUi.open(this, new MenuUtama());
+        if (crud.requestClose()) {
+            AppUi.open(this, new MenuUtama());
+        }
     }//GEN-LAST:event_jButton1ActionPerformed
 
     private void btninsertMouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_btninsertMouseClicked

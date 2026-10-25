@@ -1,6 +1,9 @@
 package shoe.store;
 
 import java.awt.Component;
+import java.awt.Cursor;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -9,14 +12,20 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.StringJoiner;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.swing.JOptionPane;
+import javax.swing.AbstractButton;
+import javax.swing.JFrame;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.Timer;
+import javax.swing.SwingWorker;
+import javax.swing.WindowConstants;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableModel;
@@ -37,11 +46,41 @@ final class CrudTableController {
     private Function<String[], String> validator = values -> null;
     private String selectedId;
     private boolean resettingSearch;
+    private JFrame window;
+    private String idleTitle;
+    private AbstractButton[] actions = new AbstractButton[0];
+    private SwingWorker<?, ?> active;
+    private boolean writing;
+    private boolean closed;
+    private long readVersion;
+    private String pendingFilter;
 
     CrudTableController(Component owner, JTable table, JTextField search,
             String tableName, String[] columns, JTextField... fields) {
         this(table, search, tableName, columns, Database::getConnection,
                 new SwingDialogs(owner), fields);
+        if (owner instanceof JFrame) {
+            window = (JFrame) owner;
+            idleTitle = window.getTitle();
+            int closeOperation = window.getDefaultCloseOperation();
+            window.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+            window.addWindowListener(new WindowAdapter() {
+                @Override
+                public void windowClosing(WindowEvent event) {
+                    if (requestClose()) {
+                        window.dispose();
+                        if (closeOperation == WindowConstants.EXIT_ON_CLOSE) {
+                            System.exit(0);
+                        }
+                    }
+                }
+
+                @Override
+                public void windowClosed(WindowEvent event) {
+                    closeReads();
+                }
+            });
+        }
     }
 
     CrudTableController(JTable table, JTextField search, String tableName,
@@ -63,7 +102,10 @@ final class CrudTableController {
         String[] headings = new String[columns.length];
         for (int i = 0; i < headings.length; i++) {
             headings[i] = table.getColumnName(i);
+            fields[i].getAccessibleContext().setAccessibleName(headings[i]);
         }
+        search.getAccessibleContext().setAccessibleName("Search records");
+        table.getAccessibleContext().setAccessibleName("Records");
         model = new DefaultTableModel(headings, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -101,18 +143,58 @@ final class CrudTableController {
         this.validator = validator;
     }
 
+    void bindActions(AbstractButton... buttons) {
+        actions = buttons.clone();
+    }
+
+    boolean isWorking() {
+        return active != null;
+    }
+
+    boolean requestClose() {
+        if (writing) {
+            dialogs.message("A change is being saved. Wait for the result before leaving this form.",
+                    "Save in progress", JOptionPane.INFORMATION_MESSAGE);
+            return false;
+        }
+        closeReads();
+        return true;
+    }
+
+    private void closeReads() {
+        closed = true;
+        pendingFilter = null;
+        readVersion++;
+        searchTimer.stop();
+        if (active != null && !writing) {
+            active.cancel(true);
+        }
+    }
+
     void stopSearch() {
         searchTimer.stop();
     }
 
     void loadAll() {
+        if (closed || writing) {
+            return;
+        }
         resetSearch();
         loadFiltered();
     }
 
     void loadFiltered() {
         searchTimer.stop();
-        loadRows("Could not load records.");
+        if (closed || writing) {
+            return;
+        }
+        String filter = search.getText().trim();
+        long version = ++readVersion;
+        if (active != null) {
+            pendingFilter = filter;
+        } else {
+            startRead(filter, version);
+        }
     }
 
     void selectRow() {
@@ -134,6 +216,9 @@ final class CrudTableController {
     }
 
     void insert() {
+        if (closed || active != null) {
+            return;
+        }
         searchTimer.stop();
         String[] values = validatedValues();
         if (values == null) {
@@ -146,6 +231,9 @@ final class CrudTableController {
     }
 
     void update() {
+        if (closed || active != null) {
+            return;
+        }
         searchTimer.stop();
         if (!requireSelection()) {
             return;
@@ -168,6 +256,9 @@ final class CrudTableController {
     }
 
     void delete() {
+        if (closed || active != null) {
+            return;
+        }
         searchTimer.stop();
         if (!requireSelection()) {
             return;
@@ -176,18 +267,24 @@ final class CrudTableController {
         if (!dialogs.confirmDelete(id)) {
             return;
         }
+        if (closed || active != null) {
+            return;
+        }
         String sql = "DELETE FROM " + tableName + " WHERE " + quoteIdentifier(columns[0]) + " = ?";
         executeMutation(sql, new String[]{id}, "Record deleted.");
     }
 
     private void scheduleSearch() {
-        if (!resettingSearch) {
+        if (!resettingSearch && !writing && !closed) {
+            readVersion++;
+            if (pendingFilter != null) {
+                pendingFilter = search.getText().trim();
+            }
             searchTimer.restart();
         }
     }
 
-    private boolean loadRows(String failureMessage) {
-        String filter = search.getText().trim();
+    private List<Object[]> readRows(String filter) throws SQLException {
         StringBuilder sql = new StringBuilder("SELECT ").append(columnList())
                 .append(" FROM ").append(tableName);
         if (!filter.isEmpty()) {
@@ -217,16 +314,59 @@ final class CrudTableController {
                     rows.add(row);
                 }
             }
-        } catch (SQLException exception) {
-            showDatabaseError(failureMessage, exception);
-            return false;
         }
+        return rows;
+    }
+
+    private void startRead(String filter, long version) {
+        setBusy(true, false);
+        active = new SwingWorker<List<Object[]>, Void>() {
+            @Override
+            protected List<Object[]> doInBackground() throws SQLException {
+                return readRows(filter);
+            }
+
+            @Override
+            protected void done() {
+                if (closed) {
+                    active = null;
+                    return;
+                }
+                try {
+                    List<Object[]> rows = get();
+                    if (version == readVersion) {
+                        applyRows(rows);
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                } catch (CancellationException exception) {
+                    // Closing the form invalidates a pending read.
+                } catch (ExecutionException exception) {
+                    if (version == readVersion) {
+                        showTaskError("Could not load records.", exception.getCause());
+                    }
+                } finally {
+                    active = null;
+                    if (pendingFilter != null) {
+                        String next = pendingFilter;
+                        pendingFilter = null;
+                        searchTimer.stop();
+                        startRead(next, readVersion);
+                    } else {
+                        setBusy(false, false);
+                    }
+                }
+            }
+        };
+        active.execute();
+    }
+
+    private void applyRows(List<Object[]> rows) {
         clearForm();
         model.setRowCount(0);
         for (Object[] row : rows) {
             model.addRow(row);
         }
-        return true;
     }
 
     private String[] validatedValues() {
@@ -261,29 +401,106 @@ final class CrudTableController {
 
     private void executeMutation(String sql, String[] values, String successMessage) {
         searchTimer.stop();
-        int affected;
-        try (Connection connection = connections.getConnection();
-                PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setQueryTimeout(QUERY_TIMEOUT_SECONDS);
-            for (int i = 0; i < values.length; i++) {
-                statement.setString(i + 1, values[i]);
+        pendingFilter = null;
+        readVersion++;
+        writing = true;
+        setBusy(true, true);
+        String[] parameters = values.clone();
+        active = new SwingWorker<MutationResult, Void>() {
+            @Override
+            protected MutationResult doInBackground() throws SQLException {
+                int affected;
+                try (Connection connection = connections.getConnection();
+                        PreparedStatement statement = connection.prepareStatement(sql)) {
+                    statement.setQueryTimeout(QUERY_TIMEOUT_SECONDS);
+                    for (int i = 0; i < parameters.length; i++) {
+                        statement.setString(i + 1, parameters[i]);
+                    }
+                    affected = statement.executeUpdate();
+                }
+                if (affected <= 0) {
+                    return new MutationResult(affected, null, null);
+                }
+                try {
+                    return new MutationResult(affected, readRows(""), null);
+                } catch (SQLException refreshError) {
+                    return new MutationResult(affected, null, refreshError);
+                }
             }
-            affected = statement.executeUpdate();
-        } catch (SQLException exception) {
-            showDatabaseError("The change could not be saved.", exception);
-            return;
+
+            @Override
+            protected void done() {
+                if (closed) {
+                    active = null;
+                    writing = false;
+                    return;
+                }
+                try {
+                    MutationResult result = get();
+                    if (result.affected <= 0) {
+                        clearForm();
+                        dialogs.message("No record was changed. Reload the table and select the record again.",
+                                "Record not changed", JOptionPane.WARNING_MESSAGE);
+                    } else {
+                        resetSearch();
+                        clearForm();
+                        if (result.refreshError == null) {
+                            applyRows(result.rows);
+                            dialogs.message(successMessage, "Saved", JOptionPane.INFORMATION_MESSAGE);
+                        } else {
+                            showDatabaseError("The change was saved, but the table could not be refreshed. "
+                                    + "Use Read before editing again. Do not repeat the save.", result.refreshError);
+                        }
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                } catch (ExecutionException exception) {
+                    showTaskError("The database did not confirm the change. Use Read to check the record "
+                            + "before saving again.", exception.getCause());
+                } finally {
+                    active = null;
+                    writing = false;
+                    setBusy(false, false);
+                }
+            }
+        };
+        active.execute();
+    }
+
+    private void setBusy(boolean busy, boolean saving) {
+        for (AbstractButton action : actions) {
+            action.setEnabled(!busy);
         }
-        if (affected <= 0) {
-            clearForm();
-            dialogs.message(
-                    "No record was changed. Reload the table and select the record again.",
-                    "Record not changed", JOptionPane.WARNING_MESSAGE);
-            return;
+        for (JTextField field : fields) {
+            field.setEnabled(!busy);
         }
-        resetSearch();
-        clearForm();
-        if (loadRows("The change was saved, but the table could not be refreshed.")) {
-            dialogs.message(successMessage, "Saved", JOptionPane.INFORMATION_MESSAGE);
+        table.setEnabled(!busy);
+        search.setEnabled(!saving);
+        if (window != null) {
+            window.setCursor(Cursor.getPredefinedCursor(busy ? Cursor.WAIT_CURSOR : Cursor.DEFAULT_CURSOR));
+            window.setTitle(busy ? (saving ? "Saving, please wait... " : "Loading records... ")
+                    + idleTitle : idleTitle);
+        }
+    }
+
+    private void showTaskError(String message, Throwable error) {
+        if (error instanceof SQLException) {
+            showDatabaseError(message, (SQLException) error);
+        } else {
+            LOGGER.log(Level.WARNING, "Database task failed: {0}", error.getClass().getSimpleName());
+            dialogs.message(message, "Database error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private static final class MutationResult {
+        private final int affected;
+        private final List<Object[]> rows;
+        private final SQLException refreshError;
+
+        MutationResult(int affected, List<Object[]> rows, SQLException refreshError) {
+            this.affected = affected;
+            this.rows = rows;
+            this.refreshError = refreshError;
         }
     }
 
@@ -306,7 +523,8 @@ final class CrudTableController {
     }
 
     private void showDatabaseError(String message, SQLException exception) {
-        LOGGER.log(Level.WARNING, message, exception);
+        LOGGER.log(Level.WARNING, "{0} SQLState={1}, code={2}",
+                new Object[]{message, exception.getSQLState(), exception.getErrorCode()});
         dialogs.message(
                 message + " Check the database settings, connection and table structure.",
                 "Database error", JOptionPane.ERROR_MESSAGE);
